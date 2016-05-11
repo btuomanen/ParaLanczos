@@ -11,12 +11,6 @@
   information. */
 
 
-  
-// To compile .ptx file (for use with matlab) */
-
-// nvcc -arch=sm_50 -rdc=true -ptx ffsvd.cu -o ffsvd.ptx
-
-
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
