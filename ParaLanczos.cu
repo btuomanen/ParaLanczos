@@ -603,10 +603,6 @@ __global__ void POS_SYM_MAT_KER(double *mat, int n, double *DetMat, double *Eige
 	smat[0].b = sqrt(smat[0].b);	 //__fsqrt_rn(smat[0].b); // intrinsic
 
 
-	if(th_null)
-		printf(" \n \n ");
-
-
 	//printf(" %f %f %f %f ", smat[0].vec[0], smat[0].vec[1], smat[0].vec[2], smat[0].vec[3]);
 
 	/* if(th_null)
@@ -1193,7 +1189,7 @@ __global__ void POS_SYM_SUBMATRIX_KER2(double *mat, int n, double *DetMat, doubl
 	eigOffset = subn * offset;
 	subOffset = subn * offset;
 
-	printf("my thx is %d my subn is %d my subwarp is %d my dimx is %d my dimx_subwarp is %d \n", thx, subn, subwarp, dimx, dimx_subwarp);
+	//printf("my thx is %d my subn is %d my subwarp is %d my dimx is %d my dimx_subwarp is %d \n", thx, subn, subwarp, dimx, dimx_subwarp);
 
 	//printf("I. \n");
 
@@ -1370,8 +1366,8 @@ __global__ void POS_SYM_SUBMATRIX_KER2(double *mat, int n, double *DetMat, doubl
 
 		if(thx == subwarp_null)
 		{
-			if(th_null)
-				printf("thx: %d, a : %g , b: %g ", thx, smat[0].a, smat[0].b);
+			//if(th_null)
+				//printf("thx: %d, a : %g , b: %g ", thx, smat[0].a, smat[0].b);
 			Beta[subwarp][l+1] = smat[0].b;
 			Alpha[subwarp][l] = smat[0].a;
 		}
