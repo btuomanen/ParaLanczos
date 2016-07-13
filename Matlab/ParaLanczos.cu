@@ -1817,7 +1817,7 @@ __host__ void calculate_subeigs3(double *mat, int subIndexLen, int matsize, doub
 
 	if( subn % 4 != 0 || subn > 128)
 	{
-		fprintf(stderr, " 'int n' must be divisible by 4, and less than or equal to 128! \n");
+		fprintf(stderr, " 'int subn' must be divisible by 4, and less than or equal to 128! \n");
 		return;
 	}
 
