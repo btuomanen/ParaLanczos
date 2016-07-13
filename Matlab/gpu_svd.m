@@ -10,7 +10,6 @@
 %  See the file LICENSE included with this distribution for more
 %  information. 
 %
-f
 function [eigs, det1, err1] = gpu_svd(g)
 
 reset(parallel.gpu.GPUDevice.current)

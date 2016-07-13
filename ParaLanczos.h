@@ -31,6 +31,8 @@ __global__ void POS_SYM_MAT_KER(double *mat, int n, double *DetMat, double *Eige
 
 __global__ void POS_SYM_SUBMATRIX_KER(double *mat, int n, double *DetMat, double *Eigenvalues, int *Eigerror, int *subIndex, int subn);
 
+__global__ void POS_SYM_SUBMATRIX_KER2(double *mat, int n, double *DetMat, double *Eigenvalues, int *Eigerror, int *subIndex, int subn);
+
 __global__ void UPPER_KER(double *mat, int n, double *Upper);
 
 
@@ -40,6 +42,9 @@ __host__ void calculate_eigs(double *mat, int n, double *Eigenvalues, double *De
 
 __host__ void calculate_subeigs(double *mat, int n, double *Eigenvalues, double *Det, int *subIndex, int subn);
 
+__host__ void calculate_subeigs2(double *mat, int n, int matsize, double *Eigenvalues, double *Det, int *subIndex, int subn);
+
+__host__ void calculate_subeigs3(double *mat, int subIndexLen, int matsize, double *Eigenvalues, double *Det, int *subIndex, int subn);
 
 
 #endif

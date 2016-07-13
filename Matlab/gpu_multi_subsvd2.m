@@ -10,7 +10,7 @@
 %  See the file LICENSE included with this distribution for more
 %  information. 
 %
-function [eigs, det1, err1] = gpu_multi_subsvd(g, subIndex, minor)
+function [eigs, det1, err1] = gpu_multi_subsvd2(g, subIndex, minor)
 
 reset(parallel.gpu.GPUDevice.current)
 
@@ -27,6 +27,11 @@ L = length(subIndex);
 
 if(M ~= N)
     fprintf('dimensions of input for matrix don''t agree! \n');
+    return;
+end
+
+if(mod(L,32) ~= 0)
+    fprintf('length of subIndex must be divisible by 32! \n');
     return;
 end
 
@@ -51,13 +56,13 @@ deigs = gpuArray(zeros(L,1,'double'));
 derr = gpuArray(zeros(L/minor,1,'int32'));
 dsubIndex = gpuArray(int32(subIndex));
 
-multi_ker = parallel.gpu.CUDAKernel('ParaLanczos.ptx', 'ParaLanczos.cu', 'POS_SYM_SUBMATRIX_KER');
+multi_ker = parallel.gpu.CUDAKernel('ParaLanczos.ptx', 'ParaLanczos.cu', 'POS_SYM_SUBMATRIX_KER2');
 
-multi_ker.ThreadBlockSize = [minor / 4];
-multi_ker.GridSize = [L / minor];
+multi_ker.ThreadBlockSize = [32];
+multi_ker.GridSize = [L / 32];
 
 
-[x, y, z, w, u] = feval(multi_ker, dg, M, ddet, deigs, derr, dsubIndex, L);
+[x, y, z, w, u] = feval(multi_ker, dg, M, ddet, deigs, derr, dsubIndex, minor);
 
 eigs = gather(z);
 det1 = gather(y);

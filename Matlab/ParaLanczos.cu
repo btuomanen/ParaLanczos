@@ -7,14 +7,8 @@
   License as published by the Free Software Foundation; either
   version 3 of the License, or (at your option) any later version.
   
-  See the file COPYING included with this distribution for more
+  See the file LICENSE included with this distribution for more
   information. */
-
-
-  
-// To compile .ptx file (for use with matlab) */
-
-// nvcc -arch=sm_50 -rdc=true -ptx ffsvd.cu -o ffsvd.ptx
 
 
 #include "cuda_runtime.h"
@@ -473,7 +467,27 @@ __inline__ __device__ void LOAD_SMS4H(sms4 &s4, double *mat, int n, int i, int j
 	s4.w = 0;
 }
 
+/* similar as above, loads from hash table. For the "full occupancy" kernel.*/
+__inline__ __device__ void LOAD_SMS4HF(sms4 &s4, double *mat, int n, int i, int j, int * hash, int offset, int subn, int subwarp_thx, int dimx_subwarp)
+{
+	int k, l;
 
+
+	for(k = 0; k < 4; k++)
+	{
+	//	printf("thx: %d, k: %d \n", thx, k);
+		for(l=0; l < 4; l++)
+		{
+	//		printf("k, l = %d, %d thx: %d index1: %d, index2: %d  \n", k, l, thx, i+k   + offset * 4 * dimx_subwarp, j+l  + offset * 4* dimx_subwarp); 
+//			printf("thx: %d LOAD_SMS$HF: (%d, %d) \n", thx, hash[i+k   + offset * 4 * dimx_subwarp], hash[j+l + offset*4*dimx_subwarp]);	
+
+			s4.mat[k*4 + l] = mat[(hash[i+k   + offset * 4 * dimx_subwarp])*n + hash[j+l  + offset * 4* dimx_subwarp] ];
+
+		}
+	}
+
+	s4.w = 0;
+}
 
 // dot product for R^4 vectors
 __inline__ __device__ double DOT4(double vec1[], double vec2[])
@@ -1143,6 +1157,333 @@ __global__ void POS_SYM_SUBMATRIX_KER(double *mat, int n, double *DetMat, double
 
 }
 
+
+__global__ void POS_SYM_SUBMATRIX_KER2(double *mat, int n, double *DetMat, double *Eigenvalues, int *Eigerror, int *subIndex, int subn)
+{
+	int i,j,k;
+	sms4 smat[32];
+
+	curandState cuState[4];
+
+// this is for subn up to size 32 .. make an entire new kernel for less subwarps
+// if you have [32][165] or so for each __shared__ array, that is too much for a Maxwell-level card.
+	__shared__ double Alpha[32][32];
+	__shared__ double Beta[32][33];
+
+	__shared__ double tempvec1[32][33];
+	__shared__ double tempvec2[32][33];
+
+	clock_t timeseed;
+	
+	int subwarp, num_subwarps, subwarp_null, subwarp_thx, threads_per_subwarp, dimx_subwarp;
+	int subOffset, eigOffset, offset;
+
+	threads_per_subwarp = subn / 4;
+
+	dimx_subwarp = threads_per_subwarp;
+
+	subwarp = thx / threads_per_subwarp;
+
+	subwarp_null = subwarp * threads_per_subwarp;
+	subwarp_thx = thx - subwarp_null;
+	num_subwarps = 32 / (threads_per_subwarp); // number of subwarps in a warp
+
+
+	offset = blockIdx.x * num_subwarps + subwarp;
+	eigOffset = subn * offset;
+	subOffset = subn * offset;
+
+	printf("my thx is %d my subn is %d my subwarp is %d my dimx is %d my dimx_subwarp is %d \n", thx, subn, subwarp, dimx, dimx_subwarp);
+
+	//printf("I. \n");
+
+	timeseed = clock();
+
+
+	for(i=0; i < 4; i++)
+		curand_init((unsigned long long ) timeseed, (unsigned long long) n, (unsigned long long) 4 * subwarp_thx + i, &cuState[i]);
+
+
+	for(i=0; i < 4; i++)
+	{
+		smat[0].vec[i] = curand_normal(&cuState[i]) ; //__sinf((double) (thx*4 + i)); //curand_uniform(dstate1) - 0.5;
+	}
+
+	// this is to compute the magnitude, for normalization.
+
+	smat[0].b = DOT4(smat[0].vec,smat[0].vec);
+
+
+	// multithreaded summation
+
+	for(k=1; k < dimx_subwarp; k *= 2)
+	{
+		smat[0].b += shfl_down64(smat[0].b, /* subwarp_null + */ k , 32);
+	}
+
+
+	smat[0].b = shfl64(smat[0].b,subwarp_null, 32);
+	smat[0].b = sqrt(smat[0].b);	 //__fsqrt_rn(smat[0].b); // intrinsic
+
+
+
+	// (I).2.2 normalize random vector
+
+	for(i=0; i<4; i++)
+	{
+		smat[0].vec[i] = smat[0].vec[i] / smat[0].b;
+		smat[0].vecw[i] = 0.0;
+		smat[0].vec_[i] = 0.0;
+	}
+
+	// (II) load 4x4 matrix structures from main matrix
+	//printf("II.. \n");
+	for(i=0; i<dimx_subwarp; i++)
+	{
+		//printf("II.1.1\n");
+		LOAD_SMS4HF(smat[i], mat, n, i*4, subwarp_thx*4,  subIndex, offset, subn, subwarp_thx, dimx_subwarp );
+		//printf("II.1.2\n");
+	}
+
+	// I think this is correct til here...
+	//printf("II.2\n");
+
+	for(i=1; i < dimx_subwarp; i++)
+	{
+		for(j=0; j < 4; j++)
+		{
+			// some of this whole operation may be redundant... the EVAL_SMS4 function
+			// below only uses smat[0].vec
+
+			//printf("II.2.1\n");
+			smat[i].vec[j] = smat[0].vec[j];
+			//printf("II.2.1.1\n");
+			tempvec1[subwarp][1+j+subwarp_thx*4] = smat[i].vec[j];
+			//printf("II.2.1.2\n");
+			smat[i].vec_[j] = 0.0;
+			smat[i].vecw[j] = 0.0;
+			//printf("II.2.1.3\n");
+		}
+	}
+
+
+
+	if(thx == subwarp_null)
+	{
+
+		tempvec1[subwarp][0] = 0.0;
+		tempvec1[subwarp][n+1] = 0.0;
+
+		tempvec1[subwarp][0] = 0.0;
+		tempvec1[subwarp][subn*4 + 2] = 0.0;
+
+		tempvec2[subwarp][0] = 0.0;
+		tempvec2[subwarp][subn*4 + 2] = 0.0;
+
+		Beta[subwarp][0] = 0.0;
+	}
+
+//	printf("11.3\n");
+	int l; 
+
+	for(l=0; l < dimx_subwarp*4; l++)
+	{
+
+		for(i=0; i< dimx_subwarp ; i++)
+		{
+			EVAL_SMS4(smat[i], smat[0].vec, smat[i].vecw);
+		}
+
+		int k;
+
+		for(i=0; i < dimx_subwarp; i++)
+		{
+
+
+			for(k=1; k < dimx_subwarp; k *= 2)
+			{
+				for(j=0; j < 4; j++)
+					{ smat[i].vecw[j] += shfl_down64(smat[i].vecw[j], (unsigned int) /* subwarp_null + */ k , 32); }
+			}
+		}
+
+
+		for(i=0; i < dimx_subwarp; i++)
+		{
+			for(j=0; j < 4; j++)
+			{
+
+				smat[i].vecw[j] = shfl64(smat[i].vecw[j], subwarp_null, 32);
+			}
+		}
+
+
+		smat[0].a = DOT4(smat[0].vec, smat[subwarp_thx].vecw);
+
+		for(k=1; k < dimx_subwarp; k *= 2)
+		{
+			smat[0].a += shfl_down64(smat[0].a, (unsigned int) /*subwarp_null + */ k, 32);
+		}
+
+		smat[0].a =  shfl64(smat[0].a, subwarp_null, 32); // propagate alpha value
+
+		// create next w vector
+
+
+		for(i=0; i < 4; i++)
+		{
+			smat[0].vecw[i] =  smat[subwarp_thx].vecw[i] -  (smat[0].a * smat[0].vec[i] + Beta[subwarp][l] * smat[0].vec_[i]);
+		}
+		smat[0].b = DOT4(smat[0].vecw,smat[0].vecw);
+
+		for(k=1; k <  dimx_subwarp; k *= 2)
+		{
+			smat[0].b += shfl_down64(smat[0].b, (unsigned int) /* subwarp_null + */ k,  32);
+		}
+
+		smat[0].b = shfl64(smat[0].b,  subwarp_null, 32);
+		smat[0].b = sqrt(smat[0].b); //__fsqrt_rn(smat[0].b);
+
+
+		// set vec_ before setting vec
+
+		for(i=0; i < 4; i++)
+		{
+			smat[0].vec_[i] = smat[0].vec[i];
+		}
+
+
+		for(i=0; i <4 ; i++)
+		{
+			smat[0].vec[i] = smat[0].vecw[i] / smat[0].b;
+		}
+
+		// propagate down , so EVAL works. (unnecessary)
+		for(j=1; j < dimx_subwarp; j++)
+		{
+			for(i=0; i < 4; i++)
+			{
+				smat[j].vec[i] = smat[0].vec[i];
+			}
+		}
+
+
+		if(thx == subwarp_null)
+		{
+			if(th_null)
+				printf("thx: %d, a : %g , b: %g ", thx, smat[0].a, smat[0].b);
+			Beta[subwarp][l+1] = smat[0].b;
+			Alpha[subwarp][l] = smat[0].a;
+		}
+	}
+
+	// pad end of shared array.
+	if(subwarp_null == thx)
+		Beta[subwarp][l+1] = 0.0;
+
+
+	double w=0.0;
+
+	// pad beginning of shared array
+
+	// BT:  this isn't reached... no thread matches up to subwarp_null ...
+	if(subwarp_null == thx)
+	{
+		tempvec1[subwarp][0] = 0.0;
+		tempvec2[subwarp][0] = 0.0;
+	}
+
+
+	int jj=0;
+
+	//for(jj=0; jj < 16; jj++)
+	{
+
+		for(i=0; i < 4; i++)
+		{
+			tempvec2[subwarp][4*subwarp_thx+1+i] =   curand_normal(&cuState[i]); // +  5*(Beta[4*thx+i] + Alpha[thx*4 + i] + Beta[4*thx+1]);
+		}
+
+		w = 0.0;
+
+		for(i = 0; i < 4; i++)
+		{
+			w += _POW2(tempvec2[subwarp][4*subwarp_thx+1+i]);
+		}
+
+		for(k=1; k < dimx_subwarp; k *= 2)
+		{
+			w += shfl_down64(w, (unsigned int) /* subwarp_null + */ k , 32);
+		}
+
+		w = shfl64(w, subwarp_null, 32);  // this is || tempvec1 ||^2
+
+		w = sqrt(w);
+
+
+		for(int ii=0; ii < 10; ii++)
+		{
+			for(i=0; i < 4; i++)
+			{
+				tempvec1[subwarp][4*subwarp_thx+1+i] = tempvec2[subwarp][4*subwarp_thx+1+i] / w;
+			}
+
+			for(i=0; i < 4; i++)
+			{
+				tempvec2[subwarp][4*subwarp_thx+1+i] = Beta[subwarp][4*subwarp_thx+i]*tempvec1[subwarp][4*subwarp_thx+i] + Alpha[subwarp][subwarp_thx*4 + i]*tempvec1[subwarp][4*subwarp_thx+i+1] + Beta[subwarp][4*subwarp_thx+1]*tempvec1[subwarp][4*subwarp_thx+i+2];
+
+			}
+
+			w = 0.0f;
+
+			for(i = 0; i < 4; i++)
+			{
+				w += _POW2(tempvec2[subwarp][4*subwarp_thx+1+i]);
+			}
+
+			for(k=1; k < dimx_subwarp; k *= 2)
+			{
+				w += shfl_down64(w, (unsigned int) /* subwarp_null + */ k , 32 );
+			}
+
+			w = shfl64(w, subwarp_null , 32);  // this is || tempvec1 ||^2
+
+			w = sqrt(w);
+		}
+	}
+
+	// compute tridiagonal matrix eigenvalues, determinent in a single thread.  copy determinent and 'Eigenerror' to global memory.
+
+
+	if(thx == subwarp_null)
+	{
+		int eigzz;
+
+		for(i =0; i < 4*dimx_subwarp+2; i++)
+			Beta[subwarp][i] *= Beta[subwarp][i];
+
+		eigzz = TQLRAT(4*dimx_subwarp, Alpha[subwarp], Beta[subwarp]);
+
+
+
+		DetMat[offset ] = DET_TRIDIAG(subn, Alpha[subwarp], Beta[subwarp]);
+	//	printf("THX: %d , DET: %g, EIGERR: %d \n", thx, DetMat[offset],eigzz);
+		Eigerror[offset] = eigzz;
+
+
+	}
+
+	// copy the eigenvalues computed above into the global memory.
+// i think the error is in here somewhere....
+	for(i = 0; i < 4; i++)
+	{
+		Eigenvalues[i + subwarp_thx*4 + offset * dimx_subwarp * 4] = Alpha[subwarp][i + subwarp_thx*4];
+
+	}
+
+}
+
+
 /* Estimates supremum of a symmetric real matrix. */
 __global__ void UPPER_KER(double *mat, int n, double *Upper)
 {
@@ -1289,6 +1630,7 @@ __global__ void UPPER_KER(double *mat, int n, double *Upper)
 }
 
 
+
 __inline__ __device__ void LOAD_SMS4X_INV(sms4 &s4, double Beta[], double theta[], double phi[], int n, int i, int j)
 {
 	int k, l;
@@ -1422,6 +1764,101 @@ __global__ void POS_SYM_SUBMATRIX_EIGENVALUES_KER(double *mat, int n, double *De
 	cudaDeviceReset();
 
 	for(int i = 0; i < subn; i++)
+		printf("%d eigenvalue: %g \n", i, Eigenvalues[i]);
+
+}
+
+__host__ void calculate_subeigs2(double *mat, int n, int matsize, double *Eigenvalues, double *Det, int *subIndex, int subn)
+{
+	dim3 D1(1,1,1);
+	dim3 D2((32),1,1);
+
+	double *dmat, *dDet, *dEigenvalues; // *dLower
+	int *dEigerror, *dSubIndex;
+
+
+	if( subn % 4 != 0 || n > 128)
+	{
+		fprintf(stderr, " 'int n' must be divisible by 4, and less than or equal to 128! \n");
+	}
+
+	printf("welcome to calculate subeigs2...\n");
+	cudaDeviceReset();
+
+	//cudaMalloc(&dEigenerror, sizeof(int));
+	cudaMalloc(&dEigenvalues, sizeof(double)*n );
+	cudaMalloc(&dmat, sizeof(double)*matsize*matsize);
+	cudaMalloc(&dDet, sizeof(double) * (32 / subn) );
+	cudaMalloc(&dSubIndex, sizeof(int)*n);
+	cudaMalloc(&dEigerror, sizeof(int)*(32/subn));
+	cudaMemcpy(dSubIndex, subIndex, sizeof(int)*n, cudaMemcpyHostToDevice);
+	cudaMemcpy(dmat, mat, sizeof(double)*matsize*matsize, cudaMemcpyHostToDevice);
+
+
+	cudaDeviceSynchronize();
+/*
+__global__ void POS_SYM_SUBMATRIX_EIGENVALUES_KER(double *mat, int n, double *DetMat, double *Eigenvalues, int *Eigerror, int *subIndex, int subn) */
+	POS_SYM_SUBMATRIX_KER2<<<D1,D2>>>(dmat, matsize, dDet, dEigenvalues, dEigerror, dSubIndex, subn);
+	cudaDeviceSynchronize();
+
+	cudaMemcpy(Eigenvalues, dEigenvalues, sizeof(double)*n, cudaMemcpyDeviceToHost);
+	cudaMemcpy(Det, dDet, sizeof(double), cudaMemcpyDeviceToHost);
+	//cudaMemcpy(&Eigenerror, dEigenerror, sizeof(int), cudaMemcpyDeviceToHost);
+	cudaDeviceReset();
+
+	for(int i = 0; i < n; i++)
+		printf("%d eigenvalue: %g \n", i, Eigenvalues[i]);
+
+}
+
+
+__host__ void calculate_subeigs3(double *mat, int subIndexLen, int matsize, double *Eigenvalues, double *Det, int *subIndex, int subn)
+{
+
+	if( subn % 4 != 0 || subn > 128)
+	{
+		fprintf(stderr, " 'int n' must be divisible by 4, and less than or equal to 128! \n");
+		return;
+	}
+
+	if( subIndexLen % 32 != 0)
+	{
+		fprintf(stderr, " 'subIndexLen' must be divisible by 32! \n");
+		return;
+	}
+
+	dim3 D1(subIndexLen / 32,1,1);
+	dim3 D2((32),1,1);
+
+	double *dmat, *dDet, *dEigenvalues; // *dLower
+	int *dEigerror, *dSubIndex;
+
+
+	printf("welcome to calculate subeigs2...\n");
+	cudaDeviceReset();
+
+	//cudaMalloc(&dEigenerror, sizeof(int));
+	cudaMalloc(&dEigenvalues, sizeof(double)*subIndexLen );
+	cudaMalloc(&dmat, sizeof(double)*matsize*matsize);
+	cudaMalloc(&dDet, sizeof(double) * (subIndexLen / subn) );
+	cudaMalloc(&dSubIndex, sizeof(int)*subIndexLen);
+	cudaMalloc(&dEigerror, sizeof(int)*(subIndexLen/subn));
+	cudaMemcpy(dSubIndex, subIndex, sizeof(int)*subIndexLen, cudaMemcpyHostToDevice);
+	cudaMemcpy(dmat, mat, sizeof(double)*matsize*matsize, cudaMemcpyHostToDevice);
+
+
+	cudaDeviceSynchronize();
+/*
+__global__ void POS_SYM_SUBMATRIX_EIGENVALUES_KER(double *mat, int n, double *DetMat, double *Eigenvalues, int *Eigerror, int *subIndex, int subn) */
+	POS_SYM_SUBMATRIX_KER2<<<D1,D2>>>(dmat, matsize, dDet, dEigenvalues, dEigerror, dSubIndex, subn);
+	cudaDeviceSynchronize();
+
+	cudaMemcpy(Eigenvalues, dEigenvalues, sizeof(double)*subIndexLen, cudaMemcpyDeviceToHost);
+	cudaMemcpy(Det, dDet, sizeof(double), cudaMemcpyDeviceToHost);
+	//cudaMemcpy(&Eigenerror, dEigenerror, sizeof(int), cudaMemcpyDeviceToHost);
+	cudaDeviceReset();
+
+	for(int i = 0; i < subIndexLen; i++)
 		printf("%d eigenvalue: %g \n", i, Eigenvalues[i]);
 
 }
