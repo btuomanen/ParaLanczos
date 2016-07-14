@@ -9,8 +9,8 @@
 #include <curand_kernel.h>
 #include <ctime>
 #include "ParaLanczos.h"
-
-
+ 
+// example of full warp occupancy
 int main()
 {
 
