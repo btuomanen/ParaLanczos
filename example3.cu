@@ -29,7 +29,7 @@ int main()
 	int n = 32;
 	int matsize = 8;
 	int minor = 8;
-	int subIndexLength = 1 * 32;
+	int subIndexLength = 8 * 32;
 
 	double Det;
 	double *Eigenvalues;

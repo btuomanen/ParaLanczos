@@ -30,11 +30,12 @@ int main()
 	int matsize = 8;
 	int minor = 4;
 
-	double Det;
+	double *Det;
 	double *Eigenvalues;
 	int *subIndex;
 
 	subIndex = (int *) malloc(sizeof(int) * 32*4);
+	Det = (double * ) malloc(sizeof(double) * (32 ) );
 
 //	We set up an submatrix index whose eigenvalues we will extract on the GPU.
 
@@ -49,7 +50,7 @@ int main()
 	Eigenvalues = (double *) malloc(sizeof(double)*n);
 
 //	This program loads the matrix above on the GPU, and then checks the above submatrix.
-	calculate_subeigs2(g, 32*4, matsize, Eigenvalues, &Det, subIndex, 4);
+	calculate_subeigs3(g, 32*4, matsize, Eigenvalues, Det, subIndex, 4);
 
 
 

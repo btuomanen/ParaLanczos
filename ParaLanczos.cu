@@ -1764,6 +1764,7 @@ __global__ void POS_SYM_SUBMATRIX_EIGENVALUES_KER(double *mat, int n, double *De
 
 }
 
+// this should be deprecated...
 __host__ void calculate_subeigs2(double *mat, int n, int matsize, double *Eigenvalues, double *Det, int *subIndex, int subn)
 {
 	dim3 D1(1,1,1);
@@ -1792,8 +1793,7 @@ __host__ void calculate_subeigs2(double *mat, int n, int matsize, double *Eigenv
 
 
 	cudaDeviceSynchronize();
-/*
-__global__ void POS_SYM_SUBMATRIX_EIGENVALUES_KER(double *mat, int n, double *DetMat, double *Eigenvalues, int *Eigerror, int *subIndex, int subn) */
+	//
 	POS_SYM_SUBMATRIX_KER2<<<D1,D2>>>(dmat, matsize, dDet, dEigenvalues, dEigerror, dSubIndex, subn);
 	cudaDeviceSynchronize();
 
@@ -1822,8 +1822,11 @@ __host__ void calculate_subeigs3(double *mat, int subIndexLen, int matsize, doub
 		fprintf(stderr, " 'subIndexLen' must be divisible by 32! \n");
 		return;
 	}
-
-	dim3 D1(subIndexLen / 32,1,1);
+	// the original error is here
+	// launch parameters should always be
+	// <<< subIndexLength / (4 * 32) , 32 >>>
+	// reason:  each thread covers 4 eigenvalues
+	dim3 D1(subIndexLen / (4*32),1,1);
 	dim3 D2((32),1,1);
 
 	double *dmat, *dDet, *dEigenvalues; // *dLower

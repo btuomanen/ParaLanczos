@@ -16,3 +16,7 @@ clean:
 	rm example3
 	rm *o
 	rm ./Matlab/*ptx
+	rm ./Matlab/*cu
+	rm *exe
+	rm *exp
+	rm *lib

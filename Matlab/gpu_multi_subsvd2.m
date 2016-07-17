@@ -59,7 +59,7 @@ dsubIndex = gpuArray(int32(subIndex));
 multi_ker = parallel.gpu.CUDAKernel('ParaLanczos.ptx', 'ParaLanczos.cu', 'POS_SYM_SUBMATRIX_KER2');
 
 multi_ker.ThreadBlockSize = [32];
-multi_ker.GridSize = [L / 32];
+multi_ker.GridSize = [L / (4*32)];
 
 
 [x, y, z, w, u] = feval(multi_ker, dg, M, ddet, deigs, derr, dsubIndex, minor);
