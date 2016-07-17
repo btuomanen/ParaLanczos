@@ -1853,7 +1853,7 @@ __global__ void POS_SYM_SUBMATRIX_EIGENVALUES_KER(double *mat, int n, double *De
 	cudaDeviceSynchronize();
 
 	cudaMemcpy(Eigenvalues, dEigenvalues, sizeof(double)*subIndexLen, cudaMemcpyDeviceToHost);
-	cudaMemcpy(Det, dDet, sizeof(double), cudaMemcpyDeviceToHost);
+	cudaMemcpy(Det, dDet, sizeof(double)*subIndexLen/(subn), cudaMemcpyDeviceToHost);
 	//cudaMemcpy(&Eigenerror, dEigenerror, sizeof(int), cudaMemcpyDeviceToHost);
 	cudaDeviceReset();
 

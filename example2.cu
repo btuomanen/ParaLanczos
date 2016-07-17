@@ -50,8 +50,13 @@ int main()
 	Eigenvalues = (double *) malloc(sizeof(double)*n);
 
 //	This program loads the matrix above on the GPU, and then checks the above submatrix.
+//	It will then print the eigenvalues
 	calculate_subeigs3(g, 32*4, matsize, Eigenvalues, Det, subIndex, 4);
 
+	// this will print determinents
+
+	for(int i = 0; i < 32; i++)
+		printf("Det %d:  %g \n", i, Det[i]);
 
 
 }
